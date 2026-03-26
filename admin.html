@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StataGO 密钥管理</title>
+<title>StataGO 管理后台</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -17,19 +17,42 @@
   }
   .login-card {
     background: #1e293b; border: 1px solid #334155; border-radius: 12px;
-    padding: 40px 36px; width: 380px;
+    padding: 40px 36px; width: 400px;
   }
   .login-card h1 { font-size: 22px; margin-bottom: 6px; color: #f1f5f9; }
-  .login-card p  { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
+  .login-card p  { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+  .field { margin-bottom: 16px; }
 
   /* ── 主后台 ── */
   #admin-page { display: none; }
   header {
     background: #1e293b; border-bottom: 1px solid #334155;
     padding: 14px 32px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 10;
   }
   header h1 { font-size: 18px; color: #f1f5f9; }
-  .container { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+  .container { max-width: 1200px; margin: 32px auto; padding: 0 24px; }
+
+  /* ── 标签页 ── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid #334155; }
+  .tab-btn {
+    padding: 10px 20px; background: none; border: none; color: #64748b;
+    font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color .15s;
+  }
+  .tab-btn.active { color: #f1f5f9; border-bottom-color: #3b82f6; }
+  .tab-btn:hover:not(.active) { color: #94a3b8; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── 统计卡片 ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 20px; text-align: center;
+  }
+  .stat-card .num { font-size: 32px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; }
+  .stat-card .lbl { font-size: 12px; color: #64748b; }
 
   /* ── 卡片 ── */
   .card {
@@ -41,21 +64,25 @@
 
   /* ── 表单元素 ── */
   label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
-  input[type="text"], input[type="password"], input[type="number"] {
+  input[type="text"], input[type="password"], input[type="number"], input[type="search"],
+  textarea, select {
     width: 100%; padding: 9px 12px; background: #0f172a;
     border: 1px solid #334155; border-radius: 6px; color: #e2e8f0;
     font-size: 14px; outline: none; transition: border-color .15s;
   }
-  input:focus { border-color: #3b82f6; }
-  .row { display: flex; gap: 12px; align-items: flex-end; }
-  .row input { flex: 1; }
+  textarea { resize: vertical; min-height: 60px; }
+  input:focus, textarea:focus, select:focus { border-color: #3b82f6; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 120px; }
+  .row > button { flex: 0 0 auto; }
 
   /* ── 按钮 ── */
   button {
     padding: 9px 18px; border: none; border-radius: 6px;
-    font-size: 13px; cursor: pointer; transition: opacity .15s;
+    font-size: 13px; cursor: pointer; transition: opacity .15s; white-space: nowrap;
   }
   button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
   .btn-primary  { background: #3b82f6; color: #fff; }
   .btn-danger   { background: #ef4444; color: #fff; }
   .btn-warning  { background: #f59e0b; color: #fff; }
@@ -77,7 +104,15 @@
     padding: 12px 16px; font-family: monospace; font-size: 15px;
     color: #34d399; letter-spacing: .05em; margin-top: 14px;
     display: none; word-break: break-all;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
   }
+  .key-result span { flex: 1; word-break: break-all; }
+  #key-result { display: none; }
+
+  /* ── 筛选行 ── */
+  .filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-row input[type="search"] { flex: 1; min-width: 160px; }
+  .filter-row select { width: 130px; flex: 0 0 130px; }
 
   /* ── 表格 ── */
   .table-wrap { overflow-x: auto; }
@@ -92,12 +127,25 @@
     display: inline-block; padding: 2px 8px; border-radius: 99px;
     font-size: 11px; font-weight: 600;
   }
-  .badge-green { background: #064e3b; color: #6ee7b7; }
-  .badge-red   { background: #450a0a; color: #fca5a5; }
-  .badge-gray  { background: #1e293b; color: #64748b; }
+  .badge-green  { background: #064e3b; color: #6ee7b7; }
+  .badge-red    { background: #450a0a; color: #fca5a5; }
+  .badge-gray   { background: #1e293b; color: #64748b; }
+  .badge-yellow { background: #451a03; color: #fde68a; }
+  .badge-blue   { background: #172554; color: #93c5fd; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .monospace { font-family: monospace; font-size: 12px; color: #94a3b8; }
   .loading { text-align: center; color: #64748b; padding: 32px; }
+
+  /* ── 备注编辑 ── */
+  .note-cell { display: flex; align-items: center; gap: 6px; }
+  .note-text { color: #94a3b8; font-size: 12px; flex: 1; min-width: 0;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+  .note-input { background: #0f172a; border: 1px solid #3b82f6; border-radius: 4px;
+                color: #e2e8f0; font-size: 12px; padding: 3px 6px; width: 140px; }
+
+  /* ── 反馈标签 ── */
+  .badge-unhandled { background: #172554; color: #93c5fd; }
+  .badge-handled   { background: #064e3b; color: #6ee7b7; }
 </style>
 </head>
 <body>
@@ -106,9 +154,15 @@
 <div id="login-page">
   <div class="login-card">
     <h1>StataGO 管理后台</h1>
-    <p>请输入 Supabase Secret key 以登录</p>
-    <label>Secret Key</label>
-    <input type="password" id="secret-input" placeholder="sb_secret_..." autocomplete="off">
+    <p>请输入 Supabase Service Key 和签名密钥以登录</p>
+    <div class="field">
+      <label>Supabase Service Role Key</label>
+      <input type="password" id="sb-key-input" placeholder="eyJ... 或 sb_secret_..." autocomplete="off">
+    </div>
+    <div class="field">
+      <label>签名密钥 (SECRET)</label>
+      <input type="password" id="secret-input" placeholder="用于生成/验证密钥签名" autocomplete="off">
+    </div>
     <div id="login-msg" class="msg"></div>
     <button class="btn-primary" style="width:100%;margin-top:16px" onclick="login()">登录</button>
   </div>
@@ -117,58 +171,150 @@
 <!-- ══════════ 管理页 ══════════ -->
 <div id="admin-page">
   <header>
-    <h1>StataGO 密钥管理</h1>
+    <h1>StataGO 管理后台</h1>
     <button class="btn-ghost" onclick="logout()">退出登录</button>
   </header>
 
   <div class="container">
+    <!-- 标签页 -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('keys')">密钥管理</button>
+      <button class="tab-btn" onclick="switchTab('feedback')">用户反馈</button>
+    </div>
 
-    <!-- 生成密钥 -->
-    <div class="card">
-      <h2>生成新密钥</h2>
-      <div class="row">
-        <div style="flex:1">
-          <label>有效期（天数）</label>
-          <input type="number" id="days-input" value="365" min="1" max="3650">
+    <!-- ═══ 密钥管理 tab ═══ -->
+    <div id="tab-keys" class="tab-panel active">
+
+      <!-- 统计卡片 -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="num" id="stat-total">—</div>
+          <div class="lbl">总密钥数</div>
         </div>
-        <button class="btn-primary" onclick="createKey()">生成并保存</button>
+        <div class="stat-card">
+          <div class="num" id="stat-active" style="color:#6ee7b7">—</div>
+          <div class="lbl">有效密钥</div>
+        </div>
+        <div class="stat-card">
+          <div class="num" id="stat-expired" style="color:#64748b">—</div>
+          <div class="lbl">已过期</div>
+        </div>
+        <div class="stat-card">
+          <div class="num" id="stat-disabled" style="color:#fca5a5">—</div>
+          <div class="lbl">已禁用</div>
+        </div>
       </div>
-      <div id="gen-msg" class="msg"></div>
-      <div id="key-result" class="key-result"></div>
+
+      <!-- 生成密钥 -->
+      <div class="card">
+        <h2>生成新密钥</h2>
+        <div class="row">
+          <div>
+            <label>有效期（天数）</label>
+            <input type="number" id="days-input" value="365" min="1" max="3650">
+          </div>
+          <div>
+            <label>备注（可选）</label>
+            <input type="text" id="note-input" placeholder="例：张三 · 学生授权">
+          </div>
+          <button class="btn-primary" onclick="createKey()">生成并保存</button>
+        </div>
+        <div id="gen-msg" class="msg"></div>
+        <div id="key-result">
+          <span id="key-result-text"></span>
+          <button class="btn-ghost btn-sm" onclick="copyKey()">复制</button>
+        </div>
+      </div>
+
+      <!-- 密钥列表 -->
+      <div class="card">
+        <h2>密钥列表 <span id="key-count" style="font-size:12px;color:#64748b"></span></h2>
+        <div class="filter-row">
+          <input type="search" id="key-search" placeholder="搜索密钥或备注..." oninput="renderKeys()">
+          <select id="key-filter" onchange="renderKeys()">
+            <option value="">全部状态</option>
+            <option value="active">有效</option>
+            <option value="expiring">即将到期（≤30天）</option>
+            <option value="expired">已过期</option>
+            <option value="disabled">已禁用</option>
+            <option value="unbound">未绑定设备</option>
+          </select>
+          <button class="btn-ghost btn-sm" onclick="loadKeys()">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>密钥</th>
+                <th>备注</th>
+                <th>到期日 / 剩余</th>
+                <th>绑定设备</th>
+                <th>最后验证</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="keys-tbody">
+              <tr><td colspan="7" class="loading">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
-    <!-- 密钥列表 -->
-    <div class="card">
-      <h2>密钥列表 <span id="key-count" style="font-size:12px;color:#64748b"></span></h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>密钥</th>
-              <th>到期日</th>
-              <th>绑定设备</th>
-              <th>最后验证</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="keys-tbody">
-            <tr><td colspan="6" class="loading">加载中...</td></tr>
-          </tbody>
-        </table>
+    <!-- ═══ 用户反馈 tab ═══ -->
+    <div id="tab-feedback" class="tab-panel">
+      <div class="card">
+        <h2>用户反馈 <span id="fb-count" style="font-size:12px;color:#64748b"></span></h2>
+        <div class="filter-row">
+          <input type="search" id="fb-search" placeholder="搜索反馈内容..." oninput="renderFeedback()">
+          <select id="fb-type-filter" onchange="renderFeedback()">
+            <option value="">全部类型</option>
+            <option value="Bug 报告">Bug 报告</option>
+            <option value="功能建议">功能建议</option>
+            <option value="使用问题">使用问题</option>
+            <option value="其他">其他</option>
+          </select>
+          <select id="fb-handled-filter" onchange="renderFeedback()">
+            <option value="">全部状态</option>
+            <option value="false">未处理</option>
+            <option value="true">已处理</option>
+          </select>
+          <button class="btn-ghost btn-sm" onclick="loadFeedback()">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>内容</th>
+                <th>联系方式</th>
+                <th>设备</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="fb-tbody">
+              <tr><td colspan="7" class="loading">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-  </div>
+  </div><!-- /container -->
 </div>
 
 <script>
 const SUPABASE_URL = "https://tfbbrslshiiyhqhagmuo.supabase.co"
-const SECRET       = "Sg8#Kp2$Xn4@Lv7!Rw1%Th3^Qm5&bJ6"
 
-let _db = null   // Supabase client，登录后创建
+let _db = null
+let _SECRET = ""
+let _allKeys = []
+let _allFeedback = []
 
-// ── 工具 ──────────────────────────────────────────
+// ── 工具 ─────────────────────────────────────────
 function showMsg(id, text, isErr) {
   const el = document.getElementById(id)
   el.textContent = text
@@ -182,11 +328,16 @@ function fmtDate(s) {
   })
 }
 function escHtml(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
     .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
 }
+function daysUntil(dateStr) {
+  if (!dateStr) return null
+  const diff = new Date(dateStr) - new Date(new Date().toISOString().slice(0,10))
+  return Math.ceil(diff / 86400000)
+}
 
-// ── 签名算法（与 keygen.py 一致）──────────────────
+// ── 签名算法 ─────────────────────────────────────
 async function sha256hex(msg) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg))
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("")
@@ -195,21 +346,23 @@ async function buildKey(days) {
   const d = new Date()
   d.setDate(d.getDate() + days)
   const expiryStr = d.toISOString().slice(0,10).replace(/-/g,"")
-  const sig = (await sha256hex(`${SECRET}:${expiryStr}`)).slice(0,16).toUpperCase()
-  return { key:`${expiryStr}-${sig}`, expiry:d.toISOString().slice(0,10) }
+  const sig = (await sha256hex(`${_SECRET}:${expiryStr}`)).slice(0,16).toUpperCase()
+  const rand = [...crypto.getRandomValues(new Uint8Array(3))]
+    .map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase()
+  return { key:`${expiryStr}-${sig}${rand}`, expiry:d.toISOString().slice(0,10) }
 }
 
 // ── 登录 / 退出 ───────────────────────────────────
 async function login() {
-  const k = document.getElementById("secret-input").value.trim()
-  if (!k) { showMsg("login-msg","请输入 Secret Key",true); return }
+  const sbKey = document.getElementById("sb-key-input").value.trim()
+  const secret = document.getElementById("secret-input").value.trim()
+  if (!sbKey) { showMsg("login-msg","请输入 Supabase Service Role Key",true); return }
+  if (!secret) { showMsg("login-msg","请输入签名密钥",true); return }
 
-  // 用输入的 key 建立 Supabase 客户端
-  const client = supabase.createClient(SUPABASE_URL, k, {
+  const client = supabase.createClient(SUPABASE_URL, sbKey, {
     auth: { persistSession: false, autoRefreshToken: false }
   })
 
-  // 试查一条记录验证 key 是否有效
   const { data, error } = await client.from("licenses").select("id").limit(1)
   if (error) {
     showMsg("login-msg", `登录失败：${error.message || error.code || JSON.stringify(error)}`, true)
@@ -217,89 +370,163 @@ async function login() {
   }
 
   _db = client
-  sessionStorage.setItem("sb_key", k)
+  _SECRET = secret
+  sessionStorage.setItem("sb_key", sbKey)
+  sessionStorage.setItem("sb_secret", secret)
   document.getElementById("login-page").style.display = "none"
   document.getElementById("admin-page").style.display = "block"
   loadKeys()
+  loadFeedback()
 }
 
 function logout() {
   sessionStorage.removeItem("sb_key")
-  _db = null
+  sessionStorage.removeItem("sb_secret")
+  _db = null; _SECRET = ""
   document.getElementById("login-page").style.display = "flex"
   document.getElementById("admin-page").style.display = "none"
+  document.getElementById("sb-key-input").value = ""
   document.getElementById("secret-input").value = ""
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  const saved = sessionStorage.getItem("sb_key")
-  if (saved) {
-    document.getElementById("secret-input").value = saved
+  const savedKey = sessionStorage.getItem("sb_key")
+  const savedSecret = sessionStorage.getItem("sb_secret")
+  if (savedKey && savedSecret) {
+    document.getElementById("sb-key-input").value = savedKey
+    document.getElementById("secret-input").value = savedSecret
     login()
   }
 })
+
+// ── 标签页切换 ─────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach((b,i) => {
+    const tabs = ["keys","feedback"]
+    b.classList.toggle("active", tabs[i] === name)
+  })
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"))
+  document.getElementById("tab-"+name).classList.add("active")
+}
 
 // ── 生成密钥 ──────────────────────────────────────
 async function createKey() {
   const days = parseInt(document.getElementById("days-input").value)
   if (!days || days < 1) { showMsg("gen-msg","请输入有效天数",true); return }
+  if (!_SECRET) { showMsg("gen-msg","请先登录（需要签名密钥）",true); return }
 
+  const note = document.getElementById("note-input").value.trim()
   const { key, expiry } = await buildKey(days)
-  const { error } = await _db.from("licenses").insert({ key, expiry })
-  if (error) {
-    showMsg("gen-msg", `保存失败：${error.message}`, true)
-    return
-  }
-  document.getElementById("key-result").textContent = key
-  document.getElementById("key-result").style.display = "block"
-  showMsg("gen-msg", `密钥已生成并保存，有效期至 ${expiry}`, false)
+  const insertData = { key, expiry }
+  if (note) insertData.note = note
+
+  const { error } = await _db.from("licenses").insert(insertData)
+  if (error) { showMsg("gen-msg", `保存失败：${error.message}`, true); return }
+
+  document.getElementById("key-result-text").textContent = key
+  document.getElementById("key-result").style.display = "flex"
+  showMsg("gen-msg", `密钥已生成，有效期至 ${expiry}`, false)
+  document.getElementById("note-input").value = ""
   loadKeys()
+}
+
+function copyKey() {
+  const text = document.getElementById("key-result-text").textContent
+  navigator.clipboard.writeText(text).then(() => {
+    showMsg("gen-msg", "已复制到剪贴板", false)
+  })
 }
 
 // ── 密钥列表 ──────────────────────────────────────
 async function loadKeys() {
   const tbody = document.getElementById("keys-tbody")
-  tbody.innerHTML = `<tr><td colspan="6" class="loading">加载中...</td></tr>`
+  tbody.innerHTML = `<tr><td colspan="7" class="loading">加载中...</td></tr>`
 
   const { data: rows, error } = await _db
     .from("licenses").select("*").order("created_at", { ascending: false })
 
   if (error) {
-    tbody.innerHTML = `<tr><td colspan="6" class="loading" style="color:#f87171">
+    tbody.innerHTML = `<tr><td colspan="7" class="loading" style="color:#f87171">
       加载失败：${escHtml(error.message)}</td></tr>`
     return
   }
 
-  document.getElementById("key-count").textContent = `（共 ${rows.length} 条）`
+  _allKeys = rows || []
+  updateStats()
+  renderKeys()
+}
+
+function updateStats() {
+  const today = new Date().toISOString().slice(0,10)
+  const total    = _allKeys.length
+  const disabled = _allKeys.filter(r => r.enabled === false).length
+  const expired  = _allKeys.filter(r => r.enabled !== false && r.expiry < today).length
+  const active   = total - disabled - expired
+  document.getElementById("stat-total").textContent   = total
+  document.getElementById("stat-active").textContent  = active
+  document.getElementById("stat-expired").textContent = expired
+  document.getElementById("stat-disabled").textContent= disabled
+  document.getElementById("key-count").textContent = `（共 ${total} 条）`
+}
+
+function renderKeys() {
+  const tbody   = document.getElementById("keys-tbody")
+  const search  = document.getElementById("key-search").value.toLowerCase()
+  const filter  = document.getElementById("key-filter").value
+  const today   = new Date().toISOString().slice(0,10)
+
+  let rows = _allKeys.filter(r => {
+    if (search) {
+      const haystack = (r.key + (r.note||"") + (r.device_name||"")).toLowerCase()
+      if (!haystack.includes(search)) return false
+    }
+    if (filter === "active")    return r.enabled !== false && r.expiry >= today && daysUntil(r.expiry) > 30
+    if (filter === "expiring")  return r.enabled !== false && r.expiry >= today && daysUntil(r.expiry) <= 30
+    if (filter === "expired")   return r.enabled !== false && r.expiry < today
+    if (filter === "disabled")  return r.enabled === false
+    if (filter === "unbound")   return !r.device_id
+    return true
+  })
+
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="loading">暂无密钥</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="7" class="loading">暂无匹配数据</td></tr>`
     return
   }
 
-  const today = new Date().toISOString().slice(0,10)
   tbody.innerHTML = rows.map(r => {
-    const expired   = r.expiry < today
-    const enabled   = r.enabled !== false
-    const hasDevice = !!r.device_id
+    const expired  = r.expiry < today
+    const enabled  = r.enabled !== false
+    const days     = daysUntil(r.expiry)
 
     let badge
-    if (!enabled)     badge = `<span class="badge badge-red">已禁用</span>`
-    else if (expired) badge = `<span class="badge badge-gray">已过期</span>`
-    else              badge = `<span class="badge badge-green">有效</span>`
+    if (!enabled)         badge = `<span class="badge badge-red">已禁用</span>`
+    else if (expired)     badge = `<span class="badge badge-gray">已过期</span>`
+    else if (days <= 7)   badge = `<span class="badge badge-red">剩余 ${days}天</span>`
+    else if (days <= 30)  badge = `<span class="badge badge-yellow">剩余 ${days}天</span>`
+    else                  badge = `<span class="badge badge-green">有效</span>`
 
-    const device = hasDevice
+    const device = r.device_id
       ? `<span title="${escHtml(r.device_id)}">${escHtml(r.device_name||r.device_id.slice(0,8)+"…")}</span>`
       : `<span style="color:#475569">未绑定</span>`
 
     const safeKey = escHtml(r.key)
+    const note = r.note || ""
+    const expiryDisplay = r.expiry + (days !== null && !expired && enabled ? ` <span style="color:#64748b;font-size:11px">${days}天</span>` : "")
+
     return `<tr>
       <td class="monospace">${safeKey}</td>
-      <td>${r.expiry}</td>
+      <td>
+        <div class="note-cell" id="note-cell-${r.id}">
+          <span class="note-text" title="${escHtml(note)}">${escHtml(note)||'<span style="color:#475569">—</span>'}</span>
+          <button class="btn-ghost btn-sm" onclick="editNote(${r.id},'${escHtml(note)}','${safeKey}')">编辑</button>
+        </div>
+      </td>
+      <td>${expiryDisplay}</td>
       <td>${device}</td>
       <td style="font-size:12px;color:#64748b">${fmtDate(r.last_seen)}</td>
       <td>${badge}</td>
       <td><div class="actions">
-        ${hasDevice?`<button class="btn-warning btn-sm" onclick="unbind('${safeKey}')">解绑</button>`:""}
+        ${r.device_id?`<button class="btn-warning btn-sm" onclick="unbind('${safeKey}')">解绑</button>`:""}
         <button class="${enabled?"btn-ghost":"btn-success"} btn-sm"
                 onclick="toggleEnable('${safeKey}',${enabled})">
           ${enabled?"禁用":"启用"}</button>
@@ -309,7 +536,28 @@ async function loadKeys() {
   }).join("")
 }
 
-// ── 操作 ──────────────────────────────────────────
+// ── 备注内联编辑 ─────────────────────────────────
+function editNote(id, currentNote, key) {
+  const cell = document.getElementById("note-cell-" + id)
+  if (!cell) return
+  cell.innerHTML = `
+    <input class="note-input" id="note-edit-${id}" type="text" value="${escHtml(currentNote)}" maxlength="100">
+    <button class="btn-primary btn-sm" onclick="saveNote(${id},'${escHtml(key)}')">保存</button>
+    <button class="btn-ghost btn-sm" onclick="loadKeys()">取消</button>
+  `
+  document.getElementById("note-edit-"+id)?.focus()
+}
+
+async function saveNote(id, key) {
+  const input = document.getElementById("note-edit-"+id)
+  if (!input) return
+  const note = input.value.trim()
+  const { error } = await _db.from("licenses").update({ note }).eq("key", key)
+  if (error) alert("保存失败：" + error.message)
+  else loadKeys()
+}
+
+// ── 密钥操作 ──────────────────────────────────────
 async function unbind(key) {
   if (!confirm(`确认解绑密钥 ${key} 的设备？`)) return
   const { error } = await _db.from("licenses").update({ device_id:null, device_name:null }).eq("key", key)
@@ -329,6 +577,79 @@ async function deleteKey(key) {
   const { error } = await _db.from("licenses").delete().eq("key", key)
   if (error) alert("删除失败：" + error.message)
   else loadKeys()
+}
+
+// ── 用户反馈 ──────────────────────────────────────
+async function loadFeedback() {
+  const tbody = document.getElementById("fb-tbody")
+  tbody.innerHTML = `<tr><td colspan="7" class="loading">加载中...</td></tr>`
+
+  const { data: rows, error } = await _db
+    .from("feedback").select("*").order("created_at", { ascending: false })
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="7" class="loading" style="color:#f87171">
+      加载失败：${escHtml(error.message)}</td></tr>`
+    return
+  }
+
+  _allFeedback = rows || []
+  const unhandled = _allFeedback.filter(r => !r.handled).length
+  document.getElementById("fb-count").textContent =
+    `（共 ${_allFeedback.length} 条${unhandled ? `，${unhandled} 条未处理` : ""}）`
+  renderFeedback()
+}
+
+function renderFeedback() {
+  const tbody      = document.getElementById("fb-tbody")
+  const search     = document.getElementById("fb-search").value.toLowerCase()
+  const typeFilter = document.getElementById("fb-type-filter").value
+  const handledFilter = document.getElementById("fb-handled-filter").value
+
+  let rows = _allFeedback.filter(r => {
+    if (search) {
+      const hay = ((r.content||"") + (r.contact||"") + (r.type||"")).toLowerCase()
+      if (!hay.includes(search)) return false
+    }
+    if (typeFilter && r.type !== typeFilter) return false
+    if (handledFilter !== "" && String(!!r.handled) !== handledFilter) return false
+    return true
+  })
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="loading">暂无匹配数据</td></tr>`
+    return
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const handled = !!r.handled
+    const badge = handled
+      ? `<span class="badge badge-handled">已处理</span>`
+      : `<span class="badge badge-unhandled">未处理</span>`
+    const contentShort = (r.content||"").length > 60
+      ? escHtml(r.content.slice(0,60)) + "…"
+      : escHtml(r.content||"")
+    return `<tr>
+      <td style="font-size:12px;color:#64748b;white-space:nowrap">${fmtDate(r.created_at)}</td>
+      <td><span class="badge badge-blue">${escHtml(r.type||"")}</span></td>
+      <td title="${escHtml(r.content||"")}" style="max-width:300px">${contentShort}</td>
+      <td class="monospace">${escHtml(r.contact||"—")}</td>
+      <td class="monospace" style="font-size:11px">${r.device_id?escHtml(r.device_id.slice(0,8)+"…"):"—"}</td>
+      <td>${badge}</td>
+      <td>
+        <button class="${handled?"btn-ghost":"btn-success"} btn-sm"
+                onclick="toggleHandled(${r.id},${handled})">
+          ${handled?"标记未处理":"标记已处理"}
+        </button>
+      </td>
+    </tr>`
+  }).join("")
+}
+
+async function toggleHandled(id, cur) {
+  const { error } = await _db.from("feedback").update({ handled: !cur }).eq("id", id)
+  if (error) alert("操作失败：" + error.message)
+  else loadFeedback()
 }
 </script>
 </body>
