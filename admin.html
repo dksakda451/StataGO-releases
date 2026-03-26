@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StataGO 密钥管理</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+  /* ── 登录页 ── */
+  #login-page {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+  }
+  .login-card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 40px 36px; width: 380px;
+  }
+  .login-card h1 { font-size: 22px; margin-bottom: 6px; color: #f1f5f9; }
+  .login-card p  { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
+
+  /* ── 主后台 ── */
+  #admin-page { display: none; }
+  header {
+    background: #1e293b; border-bottom: 1px solid #334155;
+    padding: 14px 32px; display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 18px; color: #f1f5f9; }
+  .container { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+
+  /* ── 卡片 ── */
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 24px; margin-bottom: 24px;
+  }
+  .card h2 { font-size: 15px; color: #94a3b8; text-transform: uppercase;
+              letter-spacing: .05em; margin-bottom: 16px; }
+
+  /* ── 表单元素 ── */
+  label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+  input[type="text"], input[type="password"], input[type="number"] {
+    width: 100%; padding: 9px 12px; background: #0f172a;
+    border: 1px solid #334155; border-radius: 6px; color: #e2e8f0;
+    font-size: 14px; outline: none; transition: border-color .15s;
+  }
+  input:focus { border-color: #3b82f6; }
+  .row { display: flex; gap: 12px; align-items: flex-end; }
+  .row input { flex: 1; }
+
+  /* ── 按钮 ── */
+  button {
+    padding: 9px 18px; border: none; border-radius: 6px;
+    font-size: 13px; cursor: pointer; transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  .btn-primary  { background: #3b82f6; color: #fff; }
+  .btn-danger   { background: #ef4444; color: #fff; }
+  .btn-warning  { background: #f59e0b; color: #fff; }
+  .btn-success  { background: #10b981; color: #fff; }
+  .btn-ghost    { background: #334155; color: #e2e8f0; }
+  .btn-sm       { padding: 5px 11px; font-size: 12px; }
+
+  /* ── 提示框 ── */
+  .msg {
+    padding: 10px 14px; border-radius: 6px; font-size: 13px;
+    margin-top: 12px; display: none;
+  }
+  .msg.ok  { background: #064e3b; color: #6ee7b7; display: block; }
+  .msg.err { background: #450a0a; color: #fca5a5; display: block; }
+
+  /* ── 生成密钥结果 ── */
+  .key-result {
+    background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+    padding: 12px 16px; font-family: monospace; font-size: 15px;
+    color: #34d399; letter-spacing: .05em; margin-top: 14px;
+    display: none; word-break: break-all;
+  }
+
+  /* ── 表格 ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; color: #64748b;
+       border-bottom: 1px solid #334155; white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid #1e293b;
+       vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1a2540; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge-green { background: #064e3b; color: #6ee7b7; }
+  .badge-red   { background: #450a0a; color: #fca5a5; }
+  .badge-gray  { background: #1e293b; color: #64748b; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .monospace { font-family: monospace; font-size: 12px; color: #94a3b8; }
+  .loading { text-align: center; color: #64748b; padding: 32px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════ 登录页 ══════════ -->
+<div id="login-page">
+  <div class="login-card">
+    <h1>StataGO 管理后台</h1>
+    <p>请输入 Supabase Secret key 以登录</p>
+    <label>Secret Key</label>
+    <input type="password" id="secret-input" placeholder="sb_secret_..." autocomplete="off">
+    <div id="login-msg" class="msg"></div>
+    <button class="btn-primary" style="width:100%;margin-top:16px" onclick="login()">登录</button>
+  </div>
+</div>
+
+<!-- ══════════ 管理页 ══════════ -->
+<div id="admin-page">
+  <header>
+    <h1>StataGO 密钥管理</h1>
+    <button class="btn-ghost" onclick="logout()">退出登录</button>
+  </header>
+
+  <div class="container">
+
+    <!-- 生成密钥 -->
+    <div class="card">
+      <h2>生成新密钥</h2>
+      <div class="row">
+        <div style="flex:1">
+          <label>有效期（天数）</label>
+          <input type="number" id="days-input" value="365" min="1" max="3650">
+        </div>
+        <button class="btn-primary" onclick="createKey()">生成并保存</button>
+      </div>
+      <div id="gen-msg" class="msg"></div>
+      <div id="key-result" class="key-result"></div>
+    </div>
+
+    <!-- 密钥列表 -->
+    <div class="card">
+      <h2>密钥列表 <span id="key-count" style="font-size:12px;color:#64748b"></span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>密钥</th>
+              <th>到期日</th>
+              <th>绑定设备</th>
+              <th>最后验证</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="keys-tbody">
+            <tr><td colspan="6" class="loading">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+//  常量
+// ══════════════════════════════════════════════════
+const SUPABASE_URL = "https://tfbbrslshiiyhqhagmuo.supabase.co"
+const SECRET       = "Sg8#Kp2$Xn4@Lv7!Rw1%Th3^Qm5&bJ6"
+
+let _apiKey = ""   // 登录后存入
+
+// ══════════════════════════════════════════════════
+//  工具函数
+// ══════════════════════════════════════════════════
+function apiFetch(path, opts = {}) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      "apikey":        _apiKey,
+      "Authorization": `Bearer ${_apiKey}`,
+      "Content-Type":  "application/json",
+      "Prefer":        "return=representation",
+      ...(opts.headers || {})
+    }
+  })
+}
+
+function showMsg(id, text, isErr) {
+  const el = document.getElementById(id)
+  el.textContent = text
+  el.className = "msg " + (isErr ? "err" : "ok")
+}
+
+function fmtDate(s) {
+  if (!s) return "—"
+  return new Date(s).toLocaleString("zh-CN", {
+    year:"numeric", month:"2-digit", day:"2-digit",
+    hour:"2-digit", minute:"2-digit"
+  })
+}
+
+// ══════════════════════════════════════════════════
+//  签名（与 Python keygen.py 完全一致）
+// ══════════════════════════════════════════════════
+async function sha256hex(msg) {
+  const buf = await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(msg)
+  )
+  return [...new Uint8Array(buf)]
+    .map(b => b.toString(16).padStart(2,"0")).join("")
+}
+
+async function generateKey(days) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  const expiryStr = d.toISOString().slice(0,10).replace(/-/g,"")
+  const hash = await sha256hex(`${SECRET}:${expiryStr}`)
+  const sig  = hash.slice(0,16).toUpperCase()
+  return { key: `${expiryStr}-${sig}`, expiry: d.toISOString().slice(0,10) }
+}
+
+// ══════════════════════════════════════════════════
+//  登录 / 退出
+// ══════════════════════════════════════════════════
+async function login() {
+  const k = document.getElementById("secret-input").value.trim()
+  if (!k) { showMsg("login-msg","请输入 Secret Key",true); return }
+  // 用该 key 试查一次，能返回 200 则有效
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/licenses?limit=1`,
+    { headers: { apikey: k, Authorization: `Bearer ${k}` } }
+  )
+  if (!resp.ok) { showMsg("login-msg","Key 无效或无权限，请检查后重试",true); return }
+  _apiKey = k
+  sessionStorage.setItem("sb_key", k)
+  document.getElementById("login-page").style.display  = "none"
+  document.getElementById("admin-page").style.display  = "block"
+  loadKeys()
+}
+
+function logout() {
+  sessionStorage.removeItem("sb_key")
+  _apiKey = ""
+  document.getElementById("login-page").style.display  = "flex"
+  document.getElementById("admin-page").style.display  = "none"
+  document.getElementById("secret-input").value = ""
+}
+
+// 页面刷新后自动恢复 session
+window.addEventListener("DOMContentLoaded", () => {
+  const saved = sessionStorage.getItem("sb_key")
+  if (saved) { _apiKey = saved; login() }
+})
+
+// ══════════════════════════════════════════════════
+//  生成密钥
+// ══════════════════════════════════════════════════
+async function createKey() {
+  const days = parseInt(document.getElementById("days-input").value)
+  if (!days || days < 1) { showMsg("gen-msg","请输入有效天数",true); return }
+
+  const { key, expiry } = await generateKey(days)
+
+  const resp = await apiFetch("licenses", {
+    method: "POST",
+    body: JSON.stringify({ key, expiry })
+  })
+
+  if (resp.status === 201 || resp.ok) {
+    document.getElementById("key-result").textContent = key
+    document.getElementById("key-result").style.display = "block"
+    showMsg("gen-msg", `密钥已生成并保存，有效期至 ${expiry}`, false)
+    loadKeys()
+  } else {
+    const err = await resp.json().catch(() => ({}))
+    showMsg("gen-msg", `保存失败：${err.message || resp.status}`, true)
+  }
+}
+
+// ══════════════════════════════════════════════════
+//  密钥列表
+// ══════════════════════════════════════════════════
+async function loadKeys() {
+  const tbody = document.getElementById("keys-tbody")
+  tbody.innerHTML = `<tr><td colspan="6" class="loading">加载中...</td></tr>`
+
+  const resp = await apiFetch("licenses?select=*&order=created_at.desc")
+  if (!resp.ok) {
+    tbody.innerHTML = `<tr><td colspan="6" class="loading" style="color:#f87171">加载失败</td></tr>`
+    return
+  }
+  const rows = await resp.json()
+  document.getElementById("key-count").textContent = `（共 ${rows.length} 条）`
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="loading">暂无密钥</td></tr>`
+    return
+  }
+
+  const today = new Date().toISOString().slice(0,10)
+  tbody.innerHTML = rows.map(r => {
+    const expired  = r.expiry < today
+    const enabled  = r.enabled !== false
+    const hasDevice = !!r.device_id
+
+    let statusBadge
+    if (!enabled)      statusBadge = `<span class="badge badge-red">已禁用</span>`
+    else if (expired)  statusBadge = `<span class="badge badge-gray">已过期</span>`
+    else               statusBadge = `<span class="badge badge-green">有效</span>`
+
+    const deviceCell = hasDevice
+      ? `<span title="${r.device_id}">${escHtml(r.device_name || r.device_id.slice(0,8)+"…")}</span>`
+      : `<span style="color:#475569">未绑定</span>`
+
+    return `<tr>
+      <td class="monospace">${escHtml(r.key)}</td>
+      <td>${r.expiry}</td>
+      <td>${deviceCell}</td>
+      <td style="font-size:12px;color:#64748b">${fmtDate(r.last_seen)}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <div class="actions">
+          ${hasDevice
+            ? `<button class="btn-warning btn-sm" onclick="unbind('${r.key}')">解绑</button>`
+            : ""}
+          <button class="${enabled ? "btn-ghost" : "btn-success"} btn-sm"
+                  onclick="toggleEnable('${r.key}', ${enabled})">
+            ${enabled ? "禁用" : "启用"}
+          </button>
+          <button class="btn-danger btn-sm" onclick="deleteKey('${r.key}')">删除</button>
+        </div>
+      </td>
+    </tr>`
+  }).join("")
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+}
+
+// ══════════════════════════════════════════════════
+//  操作
+// ══════════════════════════════════════════════════
+async function unbind(key) {
+  if (!confirm(`确认解绑密钥 ${key} 的设备？`)) return
+  const resp = await apiFetch(
+    `licenses?key=eq.${encodeURIComponent(key)}`,
+    { method: "PATCH", body: JSON.stringify({ device_id: null, device_name: null }) }
+  )
+  if (resp.ok) loadKeys()
+  else alert("操作失败：" + resp.status)
+}
+
+async function toggleEnable(key, currentEnabled) {
+  const action = currentEnabled ? "禁用" : "启用"
+  if (!confirm(`确认${action}密钥 ${key}？`)) return
+  const resp = await apiFetch(
+    `licenses?key=eq.${encodeURIComponent(key)}`,
+    { method: "PATCH", body: JSON.stringify({ enabled: !currentEnabled }) }
+  )
+  if (resp.ok) loadKeys()
+  else alert("操作失败：" + resp.status)
+}
+
+async function deleteKey(key) {
+  if (!confirm(`⚠️ 确认永久删除密钥 ${key}？此操作不可恢复！`)) return
+  const resp = await apiFetch(
+    `licenses?key=eq.${encodeURIComponent(key)}`,
+    { method: "DELETE" }
+  )
+  if (resp.ok) loadKeys()
+  else alert("删除失败：" + resp.status)
+}
+</script>
+</body>
+</html>
