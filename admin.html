@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StataGO 密钥管理</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -162,36 +163,17 @@
 </div>
 
 <script>
-// ══════════════════════════════════════════════════
-//  常量
-// ══════════════════════════════════════════════════
 const SUPABASE_URL = "https://tfbbrslshiiyhqhagmuo.supabase.co"
 const SECRET       = "Sg8#Kp2$Xn4@Lv7!Rw1%Th3^Qm5&bJ6"
 
-let _apiKey = ""   // 登录后存入
+let _db = null   // Supabase client，登录后创建
 
-// ══════════════════════════════════════════════════
-//  工具函数
-// ══════════════════════════════════════════════════
-function apiFetch(path, opts = {}) {
-  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...opts,
-    headers: {
-      "apikey":        _apiKey,
-      "Authorization": `Bearer ${_apiKey}`,
-      "Content-Type":  "application/json",
-      "Prefer":        "return=representation",
-      ...(opts.headers || {})
-    }
-  })
-}
-
+// ── 工具 ──────────────────────────────────────────
 function showMsg(id, text, isErr) {
   const el = document.getElementById(id)
   el.textContent = text
   el.className = "msg " + (isErr ? "err" : "ok")
 }
-
 function fmtDate(s) {
   if (!s) return "—"
   return new Date(s).toLocaleString("zh-CN", {
@@ -199,100 +181,96 @@ function fmtDate(s) {
     hour:"2-digit", minute:"2-digit"
   })
 }
-
-// ══════════════════════════════════════════════════
-//  签名（与 Python keygen.py 完全一致）
-// ══════════════════════════════════════════════════
-async function sha256hex(msg) {
-  const buf = await crypto.subtle.digest(
-    "SHA-256", new TextEncoder().encode(msg)
-  )
-  return [...new Uint8Array(buf)]
-    .map(b => b.toString(16).padStart(2,"0")).join("")
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
 }
 
-async function generateKey(days) {
+// ── 签名算法（与 keygen.py 一致）──────────────────
+async function sha256hex(msg) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg))
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("")
+}
+async function buildKey(days) {
   const d = new Date()
   d.setDate(d.getDate() + days)
   const expiryStr = d.toISOString().slice(0,10).replace(/-/g,"")
-  const hash = await sha256hex(`${SECRET}:${expiryStr}`)
-  const sig  = hash.slice(0,16).toUpperCase()
-  return { key: `${expiryStr}-${sig}`, expiry: d.toISOString().slice(0,10) }
+  const sig = (await sha256hex(`${SECRET}:${expiryStr}`)).slice(0,16).toUpperCase()
+  return { key:`${expiryStr}-${sig}`, expiry:d.toISOString().slice(0,10) }
 }
 
-// ══════════════════════════════════════════════════
-//  登录 / 退出
-// ══════════════════════════════════════════════════
+// ── 登录 / 退出 ───────────────────────────────────
 async function login() {
   const k = document.getElementById("secret-input").value.trim()
   if (!k) { showMsg("login-msg","请输入 Secret Key",true); return }
-  // 用该 key 试查一次，能返回 200 则有效
-  const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/licenses?limit=1`,
-    { headers: { apikey: k, Authorization: `Bearer ${k}` } }
-  )
-  if (!resp.ok) { showMsg("login-msg","Key 无效或无权限，请检查后重试",true); return }
-  _apiKey = k
+
+  // 用输入的 key 建立 Supabase 客户端
+  const client = supabase.createClient(SUPABASE_URL, k, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  })
+
+  // 试查一条记录验证 key 是否有效
+  const { data, error } = await client.from("licenses").select("id").limit(1)
+  if (error) {
+    showMsg("login-msg", `登录失败：${error.message || error.code || JSON.stringify(error)}`, true)
+    return
+  }
+
+  _db = client
   sessionStorage.setItem("sb_key", k)
-  document.getElementById("login-page").style.display  = "none"
-  document.getElementById("admin-page").style.display  = "block"
+  document.getElementById("login-page").style.display = "none"
+  document.getElementById("admin-page").style.display = "block"
   loadKeys()
 }
 
 function logout() {
   sessionStorage.removeItem("sb_key")
-  _apiKey = ""
-  document.getElementById("login-page").style.display  = "flex"
-  document.getElementById("admin-page").style.display  = "none"
+  _db = null
+  document.getElementById("login-page").style.display = "flex"
+  document.getElementById("admin-page").style.display = "none"
   document.getElementById("secret-input").value = ""
 }
 
-// 页面刷新后自动恢复 session
 window.addEventListener("DOMContentLoaded", () => {
   const saved = sessionStorage.getItem("sb_key")
-  if (saved) { _apiKey = saved; login() }
+  if (saved) {
+    document.getElementById("secret-input").value = saved
+    login()
+  }
 })
 
-// ══════════════════════════════════════════════════
-//  生成密钥
-// ══════════════════════════════════════════════════
+// ── 生成密钥 ──────────────────────────────────────
 async function createKey() {
   const days = parseInt(document.getElementById("days-input").value)
   if (!days || days < 1) { showMsg("gen-msg","请输入有效天数",true); return }
 
-  const { key, expiry } = await generateKey(days)
-
-  const resp = await apiFetch("licenses", {
-    method: "POST",
-    body: JSON.stringify({ key, expiry })
-  })
-
-  if (resp.status === 201 || resp.ok) {
-    document.getElementById("key-result").textContent = key
-    document.getElementById("key-result").style.display = "block"
-    showMsg("gen-msg", `密钥已生成并保存，有效期至 ${expiry}`, false)
-    loadKeys()
-  } else {
-    const err = await resp.json().catch(() => ({}))
-    showMsg("gen-msg", `保存失败：${err.message || resp.status}`, true)
+  const { key, expiry } = await buildKey(days)
+  const { error } = await _db.from("licenses").insert({ key, expiry })
+  if (error) {
+    showMsg("gen-msg", `保存失败：${error.message}`, true)
+    return
   }
+  document.getElementById("key-result").textContent = key
+  document.getElementById("key-result").style.display = "block"
+  showMsg("gen-msg", `密钥已生成并保存，有效期至 ${expiry}`, false)
+  loadKeys()
 }
 
-// ══════════════════════════════════════════════════
-//  密钥列表
-// ══════════════════════════════════════════════════
+// ── 密钥列表 ──────────────────────────────────────
 async function loadKeys() {
   const tbody = document.getElementById("keys-tbody")
   tbody.innerHTML = `<tr><td colspan="6" class="loading">加载中...</td></tr>`
 
-  const resp = await apiFetch("licenses?select=*&order=created_at.desc")
-  if (!resp.ok) {
-    tbody.innerHTML = `<tr><td colspan="6" class="loading" style="color:#f87171">加载失败</td></tr>`
+  const { data: rows, error } = await _db
+    .from("licenses").select("*").order("created_at", { ascending: false })
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="6" class="loading" style="color:#f87171">
+      加载失败：${escHtml(error.message)}</td></tr>`
     return
   }
-  const rows = await resp.json()
-  document.getElementById("key-count").textContent = `（共 ${rows.length} 条）`
 
+  document.getElementById("key-count").textContent = `（共 ${rows.length} 条）`
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="6" class="loading">暂无密钥</td></tr>`
     return
@@ -300,79 +278,57 @@ async function loadKeys() {
 
   const today = new Date().toISOString().slice(0,10)
   tbody.innerHTML = rows.map(r => {
-    const expired  = r.expiry < today
-    const enabled  = r.enabled !== false
+    const expired   = r.expiry < today
+    const enabled   = r.enabled !== false
     const hasDevice = !!r.device_id
 
-    let statusBadge
-    if (!enabled)      statusBadge = `<span class="badge badge-red">已禁用</span>`
-    else if (expired)  statusBadge = `<span class="badge badge-gray">已过期</span>`
-    else               statusBadge = `<span class="badge badge-green">有效</span>`
+    let badge
+    if (!enabled)     badge = `<span class="badge badge-red">已禁用</span>`
+    else if (expired) badge = `<span class="badge badge-gray">已过期</span>`
+    else              badge = `<span class="badge badge-green">有效</span>`
 
-    const deviceCell = hasDevice
-      ? `<span title="${r.device_id}">${escHtml(r.device_name || r.device_id.slice(0,8)+"…")}</span>`
+    const device = hasDevice
+      ? `<span title="${escHtml(r.device_id)}">${escHtml(r.device_name||r.device_id.slice(0,8)+"…")}</span>`
       : `<span style="color:#475569">未绑定</span>`
 
+    const safeKey = escHtml(r.key)
     return `<tr>
-      <td class="monospace">${escHtml(r.key)}</td>
+      <td class="monospace">${safeKey}</td>
       <td>${r.expiry}</td>
-      <td>${deviceCell}</td>
+      <td>${device}</td>
       <td style="font-size:12px;color:#64748b">${fmtDate(r.last_seen)}</td>
-      <td>${statusBadge}</td>
-      <td>
-        <div class="actions">
-          ${hasDevice
-            ? `<button class="btn-warning btn-sm" onclick="unbind('${r.key}')">解绑</button>`
-            : ""}
-          <button class="${enabled ? "btn-ghost" : "btn-success"} btn-sm"
-                  onclick="toggleEnable('${r.key}', ${enabled})">
-            ${enabled ? "禁用" : "启用"}
-          </button>
-          <button class="btn-danger btn-sm" onclick="deleteKey('${r.key}')">删除</button>
-        </div>
-      </td>
+      <td>${badge}</td>
+      <td><div class="actions">
+        ${hasDevice?`<button class="btn-warning btn-sm" onclick="unbind('${safeKey}')">解绑</button>`:""}
+        <button class="${enabled?"btn-ghost":"btn-success"} btn-sm"
+                onclick="toggleEnable('${safeKey}',${enabled})">
+          ${enabled?"禁用":"启用"}</button>
+        <button class="btn-danger btn-sm" onclick="deleteKey('${safeKey}')">删除</button>
+      </div></td>
     </tr>`
   }).join("")
 }
 
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
-}
-
-// ══════════════════════════════════════════════════
-//  操作
-// ══════════════════════════════════════════════════
+// ── 操作 ──────────────────────────────────────────
 async function unbind(key) {
   if (!confirm(`确认解绑密钥 ${key} 的设备？`)) return
-  const resp = await apiFetch(
-    `licenses?key=eq.${encodeURIComponent(key)}`,
-    { method: "PATCH", body: JSON.stringify({ device_id: null, device_name: null }) }
-  )
-  if (resp.ok) loadKeys()
-  else alert("操作失败：" + resp.status)
+  const { error } = await _db.from("licenses").update({ device_id:null, device_name:null }).eq("key", key)
+  if (error) alert("操作失败：" + error.message)
+  else loadKeys()
 }
 
-async function toggleEnable(key, currentEnabled) {
-  const action = currentEnabled ? "禁用" : "启用"
-  if (!confirm(`确认${action}密钥 ${key}？`)) return
-  const resp = await apiFetch(
-    `licenses?key=eq.${encodeURIComponent(key)}`,
-    { method: "PATCH", body: JSON.stringify({ enabled: !currentEnabled }) }
-  )
-  if (resp.ok) loadKeys()
-  else alert("操作失败：" + resp.status)
+async function toggleEnable(key, cur) {
+  if (!confirm(`确认${cur?"禁用":"启用"}此密钥？`)) return
+  const { error } = await _db.from("licenses").update({ enabled: !cur }).eq("key", key)
+  if (error) alert("操作失败：" + error.message)
+  else loadKeys()
 }
 
 async function deleteKey(key) {
   if (!confirm(`⚠️ 确认永久删除密钥 ${key}？此操作不可恢复！`)) return
-  const resp = await apiFetch(
-    `licenses?key=eq.${encodeURIComponent(key)}`,
-    { method: "DELETE" }
-  )
-  if (resp.ok) loadKeys()
-  else alert("删除失败：" + resp.status)
+  const { error } = await _db.from("licenses").delete().eq("key", key)
+  if (error) alert("删除失败：" + error.message)
+  else loadKeys()
 }
 </script>
 </body>
