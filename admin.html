@@ -154,14 +154,10 @@
 <div id="login-page">
   <div class="login-card">
     <h1>StataGO 管理后台</h1>
-    <p>请输入 Supabase Service Key 和签名密钥以登录</p>
+    <p>请输入 Supabase Service Role Key 以登录</p>
     <div class="field">
       <label>Supabase Service Role Key</label>
       <input type="password" id="sb-key-input" placeholder="eyJ... 或 sb_secret_..." autocomplete="off">
-    </div>
-    <div class="field">
-      <label>签名密钥 (SECRET)</label>
-      <input type="password" id="secret-input" placeholder="用于生成/验证密钥签名" autocomplete="off">
     </div>
     <div id="login-msg" class="msg"></div>
     <button class="btn-primary" style="width:100%;margin-top:16px" onclick="login()">登录</button>
@@ -310,7 +306,6 @@
 const SUPABASE_URL = "https://tfbbrslshiiyhqhagmuo.supabase.co"
 
 let _db = null
-let _SECRET = ""
 let _allKeys = []
 let _allFeedback = []
 
@@ -337,27 +332,20 @@ function daysUntil(dateStr) {
   return Math.ceil(diff / 86400000)
 }
 
-// ── 签名算法 ─────────────────────────────────────
-async function sha256hex(msg) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg))
-  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("")
-}
-async function buildKey(days) {
+// ── 密钥生成（纯随机，无需 SECRET）─────────────────
+function buildKey(days) {
   const d = new Date()
   d.setDate(d.getDate() + days)
   const expiryStr = d.toISOString().slice(0,10).replace(/-/g,"")
-  const sig = (await sha256hex(`${_SECRET}:${expiryStr}`)).slice(0,16).toUpperCase()
-  const rand = [...crypto.getRandomValues(new Uint8Array(3))]
+  const rand = [...crypto.getRandomValues(new Uint8Array(16))]
     .map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase()
-  return { key:`${expiryStr}-${sig}${rand}`, expiry:d.toISOString().slice(0,10) }
+  return { key:`${expiryStr}-${rand}`, expiry:d.toISOString().slice(0,10) }
 }
 
 // ── 登录 / 退出 ───────────────────────────────────
 async function login() {
   const sbKey = document.getElementById("sb-key-input").value.trim()
-  const secret = document.getElementById("secret-input").value.trim()
   if (!sbKey) { showMsg("login-msg","请输入 Supabase Service Role Key",true); return }
-  if (!secret) { showMsg("login-msg","请输入签名密钥",true); return }
 
   const client = supabase.createClient(SUPABASE_URL, sbKey, {
     auth: { persistSession: false, autoRefreshToken: false }
@@ -370,9 +358,7 @@ async function login() {
   }
 
   _db = client
-  _SECRET = secret
   sessionStorage.setItem("sb_key", sbKey)
-  sessionStorage.setItem("sb_secret", secret)
   document.getElementById("login-page").style.display = "none"
   document.getElementById("admin-page").style.display = "block"
   loadKeys()
@@ -381,20 +367,16 @@ async function login() {
 
 function logout() {
   sessionStorage.removeItem("sb_key")
-  sessionStorage.removeItem("sb_secret")
-  _db = null; _SECRET = ""
+  _db = null
   document.getElementById("login-page").style.display = "flex"
   document.getElementById("admin-page").style.display = "none"
   document.getElementById("sb-key-input").value = ""
-  document.getElementById("secret-input").value = ""
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   const savedKey = sessionStorage.getItem("sb_key")
-  const savedSecret = sessionStorage.getItem("sb_secret")
-  if (savedKey && savedSecret) {
+  if (savedKey) {
     document.getElementById("sb-key-input").value = savedKey
-    document.getElementById("secret-input").value = savedSecret
     login()
   }
 })
@@ -413,10 +395,9 @@ function switchTab(name) {
 async function createKey() {
   const days = parseInt(document.getElementById("days-input").value)
   if (!days || days < 1) { showMsg("gen-msg","请输入有效天数",true); return }
-  if (!_SECRET) { showMsg("gen-msg","请先登录（需要签名密钥）",true); return }
 
   const note = document.getElementById("note-input").value.trim()
-  const { key, expiry } = await buildKey(days)
+  const { key, expiry } = buildKey(days)
   const insertData = { key, expiry }
   if (note) insertData.note = note
 
